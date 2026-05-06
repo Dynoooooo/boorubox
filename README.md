@@ -72,20 +72,27 @@ Implemented:
 
 - Search page with provider selector, tags, exclusions, rating, page, limit,
   search, clear, SFW mode toggle, and SFW/NSFW indicator.
+- Pressing Enter on the Search page runs the same action as the Search button.
 - Results page with a thumbnail grid, multi-select, metadata panel, preview
-  panel, download selected/all visible, and open post URL.
+  panel, download selected/all visible, open post URL, and Use as Reference.
 - Preview loading through the existing preview cache. Preview/sample URLs are
   preferred; full originals are not downloaded just to preview.
 - Queue page with status, progress bars, speed, error messages, retry failed, and
   cancel selected.
+- Queue cleanup can clear failed and skipped jobs, including skipped duplicate
+  downloads, without touching active downloads.
 - Gallery page with local thumbnails, provider/rating/favorite filters, tag
-  search, sorting, image preview, open file, and rebuild index.
+  search, sorting, image preview, open file, Use as Reference, and rebuild index.
+- Reference images from Results or Gallery are shown on the Search page. Their
+  metadata tags are displayed but are only copied into the Tags field when the
+  user clicks Use Reference Tags.
 - Settings page that loads/saves the config, including `enable_nsfw`,
   directories, User-Agent, rating, download quality, blacklist, and provider
-  toggles. Provider and downloader structural changes apply after restart.
+  toggles. Provider enable/disable changes apply live; downloader structural
+  changes apply after restart.
 - Rating controls hide sensitive/questionable/explicit choices while SFW mode is
   active.
-- Logs page that polls the existing in-memory logger.
+- Logs page that polls the existing in-memory logger and supports Copy All.
 
 ## Migration Plan
 
