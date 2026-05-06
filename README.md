@@ -103,7 +103,18 @@ Use a custom config path:
 The main executable is a Qt desktop app. It opens a normal window with sidebar
 navigation for Search, Results, Queue, Gallery, Settings, and Logs.
 
-## GUI MVP
+## CI
+
+GitHub Actions runs on pushes and pull requests. The workflow builds and tests
+the project on Ubuntu with:
+
+- Release
+- Debug with ASan/UBSan
+- Debug with TSan, currently marked experimental
+
+Each job configures with CMake, builds the app/tests, and runs CTest.
+
+## Features
 
 Implemented:
 
