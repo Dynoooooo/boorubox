@@ -10,6 +10,11 @@ archive defaults to SQLite when the index path ends in `.sqlite`, `.sqlite3`, or
 `.db`; SQLite itself is a C library, but all BooruBox application code remains
 C++. A JSONL index remains available by setting `index_path` to a `.jsonl` file.
 
+## License
+
+BooruBox is licensed under the GNU Affero General Public License version 3. See
+`LICENSE` for the full license text.
+
 ## Safety Defaults
 
 BooruBox defaults to SFW mode:
