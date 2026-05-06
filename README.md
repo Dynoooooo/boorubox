@@ -122,19 +122,9 @@ Implemented:
   active.
 - Logs page that polls the existing in-memory logger and supports Copy All.
 
-## Migration Plan
+## Roadmap
 
-Completed first GUI pass:
-
-1. Kept backend classes and tests intact.
-2. Added small backend hooks: config saving, runtime `enable_nsfw` toggle, queue
-   retry/cancel, and archive rebuild.
-3. Added `src/gui` with Qt Widgets pages.
-4. Replaced the FTXUI executable target with a Qt Widgets executable.
-5. Left old `src/tui` files in place but unbuilt, so they can be deleted later
-   after the GUI has more runtime mileage.
-
-Next page polish order:
+Next GUI polish order:
 
 1. Results: richer thumbnail cache state and duplicate/skipped indicators.
 2. Queue: clear completed and better ETA formatting.
@@ -225,9 +215,8 @@ Implemented modules:
 - `download`: queued download manager, `.part` files, retries, resume, filename
   templates
 - `index`: archive interface, JSONL implementation, optional SQLite implementation
-- `preview`: preview cache plus old terminal preview abstractions retained for now
+- `preview`: preview cache and preview backend abstractions
 - `gui`: Qt Widgets main window and pages
-- `tui`: old FTXUI files retained but no longer built
 - `tests`: URL building, JSON parsing, filename sanitization, blacklist filtering,
   duplicate detection, archive indexing
 
@@ -261,6 +250,5 @@ boorubox/
     preview/
     index/
     util/
-    tui/  # legacy, unbuilt
   tests/
 ```
