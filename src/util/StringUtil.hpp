@@ -18,5 +18,6 @@ std::string sanitize_filename_component(std::string_view value,
 std::string replace_all(std::string value, std::string_view needle,
                         std::string_view replacement);
 bool starts_with(std::string_view value, std::string_view prefix);
+std::string redact_url_secrets(std::string_view value);
 
 }  // namespace boorubox

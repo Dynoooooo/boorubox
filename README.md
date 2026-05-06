@@ -85,6 +85,15 @@ ctest --test-dir build --output-on-failure
 ./build/boorubox
 ```
 
+Optional local sanitizer run:
+
+```bash
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+  -DBOORUBOX_SANITIZERS=address,undefined
+cmake --build build-asan -j
+ctest --test-dir build-asan --output-on-failure
+```
+
 Use a custom config path:
 
 ```bash

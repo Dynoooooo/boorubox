@@ -2,6 +2,7 @@
 
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -24,6 +25,7 @@ struct DownloadOptions {
 class DownloadManager {
  public:
   DownloadManager(HttpClient& http, ArchiveIndex& index, ContentRules rules,
+                  std::shared_ptr<std::mutex> index_mutex,
                   DownloadOptions options);
   ~DownloadManager();
 
@@ -40,11 +42,14 @@ class DownloadManager {
   void worker_loop(std::stop_token stop_token);
   void process_job(std::size_t job_id);
   std::string selected_url(const Post& post) const;
+  bool is_cancelled(std::size_t job_id) const;
+  bool has_duplicate_job_locked(std::size_t job_id) const;
   LocalArchiveItem archive_item_from_job(const DownloadJob& job) const;
   void update_job(std::size_t job_id, const std::function<void(DownloadJob&)>& fn);
 
   HttpClient& http_;
   ArchiveIndex& index_;
+  std::shared_ptr<std::mutex> index_mutex_;
   ContentRules rules_;
   DownloadOptions options_;
 

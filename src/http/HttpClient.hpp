@@ -3,10 +3,16 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace boorubox {
+
+class HttpRequestCancelled final : public std::runtime_error {
+ public:
+  HttpRequestCancelled();
+};
 
 struct HttpResponse {
   long status_code = 0;
@@ -30,7 +36,8 @@ class HttpClient {
   void download_to_file(
       const std::string& url, const std::filesystem::path& output_path,
       bool resume,
-      const std::function<void(const HttpDownloadProgress&)>& progress = {})
+      const std::function<void(const HttpDownloadProgress&)>& progress = {},
+      const std::function<bool()>& should_cancel = {})
       const;
 
   const std::string& user_agent() const;

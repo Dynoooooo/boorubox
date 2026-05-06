@@ -82,10 +82,11 @@ std::optional<SearchQuery> wildcard_retry_query(const SearchQuery& query) {
 App::App(AppConfig config)
     : config_(std::move(config)),
       http_(config_.user_agent),
+      archive_mutex_(std::make_shared<std::mutex>()),
       index_(make_archive_index(config_.index_path)),
       preview_cache_(config_.cache_dir, http_),
       download_manager_(
-          http_, *index_, content_rules(),
+          http_, *index_, content_rules_unlocked(), archive_mutex_,
           DownloadOptions{
               .download_dir = config_.download_dir,
               .filename_template = config_.filename_template,
@@ -100,22 +101,34 @@ App::App(AppConfig config)
   register_providers();
 }
 
-const AppConfig& App::config() const {
+AppConfig App::config() const {
+  std::lock_guard lock(state_mutex_);
   return config_;
 }
 
 void App::apply_runtime_config(AppConfig config) {
-  config_ = std::move(config);
-  rebuild_providers();
-  download_manager_.set_content_rules(content_rules());
+  ContentRules rules;
+  {
+    std::lock_guard lock(state_mutex_);
+    config_ = std::move(config);
+    rebuild_providers();
+    rules = content_rules_unlocked();
+  }
+  download_manager_.set_content_rules(std::move(rules));
 }
 
 void App::set_enable_nsfw(bool enabled) {
-  config_.enable_nsfw = enabled;
-  download_manager_.set_content_rules(content_rules());
+  ContentRules rules;
+  {
+    std::lock_guard lock(state_mutex_);
+    config_.enable_nsfw = enabled;
+    rules = content_rules_unlocked();
+  }
+  download_manager_.set_content_rules(std::move(rules));
 }
 
 std::vector<std::string> App::provider_names() const {
+  std::lock_guard lock(state_mutex_);
   std::vector<std::string> names;
   for (const auto& provider : providers_) {
     if (!config_.enable_nsfw && provider->is_nsfw_provider()) {
@@ -127,6 +140,7 @@ std::vector<std::string> App::provider_names() const {
 }
 
 std::vector<Post> App::search(const SearchQuery& query) {
+  std::lock_guard lock(state_mutex_);
   auto* provider = provider_by_name(query.provider_name);
   if (provider == nullptr) {
     throw std::runtime_error("unknown provider: " + query.provider_name);
@@ -139,14 +153,14 @@ std::vector<Post> App::search(const SearchQuery& query) {
   const auto run_query = [&](const SearchQuery& current_query,
                              bool retry) -> std::pair<std::vector<Post>, std::size_t> {
     const auto request =
-        provider->build_search_request(current_query, search_safety());
+        provider->build_search_request(current_query, search_safety_unlocked());
     logger_.info(std::string(retry ? "Search retry on " : "Search started on ") +
                  current_query.provider_name + ": tags=\"" +
                  join(current_query.tags, " ") + "\" excluded=\"" +
                  join(current_query.excluded_tags, " ") + "\" rating=" +
                  to_string(current_query.rating_filter) +
                  (config_.enable_nsfw ? " nsfw=on" : " sfw=on"));
-    logger_.info("GET " + request.url);
+    logger_.info("GET " + redact_url_secrets(request.url));
     for (std::size_t i = 0; i < providers_.size(); ++i) {
       if (providers_[i].get() == provider) {
         rate_limiters_[i]->wait();
@@ -166,7 +180,7 @@ std::vector<Post> App::search(const SearchQuery& query) {
                    " result(s) by requested rating");
     }
     const auto before_safety = posts.size();
-    posts = filter_posts(std::move(posts), content_rules());
+    posts = filter_posts(std::move(posts), content_rules_unlocked());
     if (posts.size() != before_safety) {
       logger_.warn("filtered " + std::to_string(before_safety - posts.size()) +
                    " result(s) by safety rules");
@@ -200,7 +214,12 @@ std::vector<Post> App::search(const SearchQuery& query) {
 
 std::size_t App::enqueue_download(const Post& post) {
   std::string reason;
-  if (!is_post_allowed(post, content_rules(), &reason)) {
+  ContentRules rules;
+  {
+    std::lock_guard lock(state_mutex_);
+    rules = content_rules_unlocked();
+  }
+  if (!is_post_allowed(post, rules, &reason)) {
     logger_.warn("refused download for post " + post.provider + "/" + post.id +
                  ": " + reason);
     throw std::runtime_error(reason);
@@ -234,11 +253,14 @@ std::vector<DownloadJob> App::download_jobs() const {
 }
 
 std::vector<LocalArchiveItem> App::archive_items(const ArchiveQuery& query) const {
+  std::lock_guard lock(*archive_mutex_);
   return index_->list(query);
 }
 
 void App::rebuild_archive() {
-  index_->rebuild_from_directory(config_.download_dir);
+  const auto config = this->config();
+  std::lock_guard lock(*archive_mutex_);
+  index_->rebuild_from_directory(config.download_dir);
 }
 
 std::filesystem::path App::ensure_preview(const Post& post) {
@@ -270,7 +292,7 @@ SiteProvider* App::provider_by_name(const std::string& name) const {
   return nullptr;
 }
 
-SearchSafety App::search_safety() const {
+SearchSafety App::search_safety_unlocked() const {
   return SearchSafety{
       .enable_nsfw = config_.enable_nsfw,
       .default_rating = config_.default_rating,
@@ -278,7 +300,7 @@ SearchSafety App::search_safety() const {
   };
 }
 
-ContentRules App::content_rules() const {
+ContentRules App::content_rules_unlocked() const {
   return ContentRules{
       .enable_nsfw = config_.enable_nsfw,
       .blacklisted_tags = config_.blacklisted_tags,

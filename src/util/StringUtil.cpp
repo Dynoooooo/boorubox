@@ -135,4 +135,36 @@ bool starts_with(std::string_view value, std::string_view prefix) {
          value.substr(0, prefix.size()) == prefix;
 }
 
+std::string redact_url_secrets(std::string_view value) {
+  std::string out(value);
+  const auto query_start = out.find('?');
+  if (query_start == std::string::npos) {
+    return out;
+  }
+
+  const std::unordered_set<std::string> secret_keys = {
+      "api_key", "apikey", "key", "token", "access_token", "auth_token",
+      "password", "passwd", "pass", "secret", "client_secret", "user_id",
+      "userid", "login",
+  };
+
+  std::size_t position = query_start + 1;
+  while (position < out.size()) {
+    const auto pair_end = out.find_first_of("&#", position);
+    const auto actual_end = pair_end == std::string::npos ? out.size() : pair_end;
+    const auto equals = out.find('=', position);
+    if (equals != std::string::npos && equals < actual_end) {
+      const auto key = lower(out.substr(position, equals - position));
+      if (secret_keys.contains(key)) {
+        out.replace(equals + 1, actual_end - equals - 1, "<redacted>");
+      }
+    }
+    if (pair_end == std::string::npos || out[pair_end] == '#') {
+      break;
+    }
+    position = pair_end + 1;
+  }
+  return out;
+}
+
 }  // namespace boorubox

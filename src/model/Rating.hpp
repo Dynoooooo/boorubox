@@ -63,8 +63,7 @@ inline std::string to_string(Rating rating) {
 }
 
 inline bool is_allowed_in_sfw_mode(Rating rating) {
-  return rating == Rating::Safe || rating == Rating::General ||
-         rating == Rating::Unknown;
+  return rating == Rating::Safe || rating == Rating::General;
 }
 
 }  // namespace boorubox

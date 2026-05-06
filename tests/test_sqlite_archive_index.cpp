@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <thread>
 #include <unistd.h>
 
 #include "index/SqliteArchiveIndex.hpp"
@@ -37,6 +38,37 @@ TEST_CASE("SQLite archive indexes and detects duplicates") {
   replacement.local_file_path = dir / "replacement.png";
   index.upsert(replacement);
   REQUIRE(index.list().size() == 1);
+
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("SQLite archive serializes concurrent duplicate upserts") {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("boorubox_sqlite_concurrent_test_" +
+                    std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  SqliteArchiveIndex index(dir / "index.sqlite");
+
+  std::vector<std::jthread> threads;
+  for (int worker = 0; worker < 8; ++worker) {
+    threads.emplace_back([&, worker] {
+      for (int i = 0; i < 25; ++i) {
+        LocalArchiveItem item;
+        item.provider = "danbooru";
+        item.post_id = "same-post";
+        item.hash = "same-hash";
+        item.file_url = "https://cdn.example/same.png";
+        item.local_file_path =
+            dir / ("worker_" + std::to_string(worker) + ".png");
+        item.rating = Rating::Safe;
+        index.upsert(item);
+      }
+    });
+  }
+  threads.clear();
+
+  REQUIRE(index.list().size() == 1);
+  REQUIRE(index.contains_duplicate("same-hash", "", "", ""));
 
   std::filesystem::remove_all(dir);
 }

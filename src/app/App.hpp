@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -19,7 +20,7 @@ class App {
  public:
   explicit App(AppConfig config);
 
-  const AppConfig& config() const;
+  AppConfig config() const;
   void apply_runtime_config(AppConfig config);
   void set_enable_nsfw(bool enabled);
   std::vector<std::string> provider_names() const;
@@ -40,13 +41,15 @@ class App {
 
  private:
   SiteProvider* provider_by_name(const std::string& name) const;
-  SearchSafety search_safety() const;
-  ContentRules content_rules() const;
+  SearchSafety search_safety_unlocked() const;
+  ContentRules content_rules_unlocked() const;
   void register_providers();
   void rebuild_providers();
 
+  mutable std::mutex state_mutex_;
   AppConfig config_;
   HttpClient http_;
+  std::shared_ptr<std::mutex> archive_mutex_;
   std::unique_ptr<ArchiveIndex> index_;
   PreviewCache preview_cache_;
   DownloadManager download_manager_;

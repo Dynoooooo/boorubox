@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <mutex>
 
 #include "index/ArchiveIndex.hpp"
 
@@ -29,6 +30,7 @@ class SqliteArchiveIndex final : public ArchiveIndex {
  private:
   class Impl;
   std::unique_ptr<Impl> impl_;
+  mutable std::mutex mutex_;
 };
 
 }  // namespace boorubox

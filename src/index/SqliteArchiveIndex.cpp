@@ -120,6 +120,33 @@ class Statement {
   sqlite3_stmt* stmt_ = nullptr;
 };
 
+class Transaction {
+ public:
+  explicit Transaction(sqlite3* db) : db_(db) {
+    check_sqlite(sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr),
+                 db_, "begin sqlite transaction");
+  }
+
+  ~Transaction() {
+    if (active_) {
+      sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+    }
+  }
+
+  Transaction(const Transaction&) = delete;
+  Transaction& operator=(const Transaction&) = delete;
+
+  void commit() {
+    check_sqlite(sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr),
+                 db_, "commit sqlite transaction");
+    active_ = false;
+  }
+
+ private:
+  sqlite3* db_ = nullptr;
+  bool active_ = true;
+};
+
 std::string column_text(sqlite3_stmt* stmt, int column) {
   const auto* text = sqlite3_column_text(stmt, column);
   return text == nullptr ? std::string{} : reinterpret_cast<const char*>(text);
@@ -168,6 +195,7 @@ class SqliteArchiveIndex::Impl {
       db_ = nullptr;
       throw std::runtime_error("open sqlite index: " + message);
     }
+    sqlite3_busy_timeout(db_, 5000);
     exec(
         "CREATE TABLE IF NOT EXISTS archive_items ("
         "id INTEGER PRIMARY KEY,"
@@ -235,6 +263,8 @@ SqliteArchiveIndex::~SqliteArchiveIndex() = default;
 
 void SqliteArchiveIndex::upsert(const LocalArchiveItem& item) {
 #ifdef BOORUBOX_WITH_SQLITE
+  std::lock_guard lock(mutex_);
+  Transaction transaction(impl_->db());
   {
     Statement delete_duplicates(
         impl_->db(),
@@ -279,6 +309,7 @@ void SqliteArchiveIndex::upsert(const LocalArchiveItem& item) {
   insert.bind(17, item.favorite ? 1 : 0);
   insert.bind(18, item.notes);
   check_sqlite(sqlite3_step(insert.get()), impl_->db(), "insert archive row");
+  transaction.commit();
 #else
   (void)item;
 #endif
@@ -289,6 +320,7 @@ bool SqliteArchiveIndex::contains_duplicate(const std::string& hash,
                                             const std::string& post_id,
                                             const std::string& file_url) const {
 #ifdef BOORUBOX_WITH_SQLITE
+  std::lock_guard lock(mutex_);
   Statement stmt(
       impl_->db(),
       "SELECT 1 FROM archive_items WHERE "
@@ -315,6 +347,7 @@ bool SqliteArchiveIndex::contains_duplicate(const std::string& hash,
 std::optional<LocalArchiveItem> SqliteArchiveIndex::find_by_provider_id(
     const std::string& provider, const std::string& post_id) const {
 #ifdef BOORUBOX_WITH_SQLITE
+  std::lock_guard lock(mutex_);
   Statement stmt(impl_->db(),
                  (std::string("SELECT ") + kSelectColumns +
                   " FROM archive_items WHERE provider = ? AND post_id = ? LIMIT 1")
@@ -335,6 +368,7 @@ std::optional<LocalArchiveItem> SqliteArchiveIndex::find_by_provider_id(
 std::optional<LocalArchiveItem> SqliteArchiveIndex::find_by_hash(
     const std::string& hash) const {
 #ifdef BOORUBOX_WITH_SQLITE
+  std::lock_guard lock(mutex_);
   Statement stmt(impl_->db(),
                  (std::string("SELECT ") + kSelectColumns +
                   " FROM archive_items WHERE hash = ? AND ? <> '' LIMIT 1")
@@ -354,6 +388,7 @@ std::optional<LocalArchiveItem> SqliteArchiveIndex::find_by_hash(
 std::vector<LocalArchiveItem> SqliteArchiveIndex::list(
     const ArchiveQuery& query) const {
 #ifdef BOORUBOX_WITH_SQLITE
+  std::lock_guard lock(mutex_);
   Statement stmt(impl_->db(),
                  (std::string("SELECT ") + kSelectColumns +
                   " FROM archive_items ORDER BY downloaded_at DESC")

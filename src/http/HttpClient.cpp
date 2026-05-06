@@ -7,6 +7,7 @@
 
 #include "http/CurlHandle.hpp"
 #include "util/PathUtil.hpp"
+#include "util/StringUtil.hpp"
 
 namespace boorubox {
 
@@ -30,14 +31,21 @@ std::size_t write_file_callback(char* ptr, std::size_t size, std::size_t nmemb,
 
 struct ProgressContext {
   const std::function<void(const HttpDownloadProgress&)>* callback = nullptr;
+  const std::function<bool()>* should_cancel = nullptr;
   CURL* handle = nullptr;
 };
 
 int xferinfo_callback(void* userdata, curl_off_t dltotal, curl_off_t dlnow,
                       curl_off_t, curl_off_t) {
   auto* context = static_cast<ProgressContext*>(userdata);
-  if (context == nullptr || context->callback == nullptr ||
-      !*context->callback) {
+  if (context == nullptr) {
+    return 0;
+  }
+  if (context->should_cancel != nullptr && *context->should_cancel &&
+      (*context->should_cancel)()) {
+    return 1;
+  }
+  if (context->callback == nullptr || !*context->callback) {
     return 0;
   }
 
@@ -47,11 +55,15 @@ int xferinfo_callback(void* userdata, curl_off_t dltotal, curl_off_t dlnow,
     curl_easy_getinfo(context->handle, CURLINFO_SPEED_DOWNLOAD_T, &speed_off);
     speed = static_cast<double>(speed_off);
   }
-  (*context->callback)(HttpDownloadProgress{
-      .downloaded = static_cast<std::int64_t>(dlnow),
-      .total = static_cast<std::int64_t>(dltotal),
-      .speed_bytes_per_second = speed,
-  });
+  try {
+    (*context->callback)(HttpDownloadProgress{
+        .downloaded = static_cast<std::int64_t>(dlnow),
+        .total = static_cast<std::int64_t>(dltotal),
+        .speed_bytes_per_second = speed,
+    });
+  } catch (const std::exception&) {
+    return 1;
+  }
   return 0;
 }
 
@@ -93,6 +105,9 @@ void configure_common(CURL* curl, const std::string& user_agent,
 HttpClient::HttpClient(std::string user_agent)
     : user_agent_(std::move(user_agent)) {}
 
+HttpRequestCancelled::HttpRequestCancelled()
+    : std::runtime_error("download cancelled") {}
+
 HttpResponse HttpClient::get(const std::string& url,
                              const std::vector<std::string>& headers) const {
   CurlEasy easy;
@@ -114,14 +129,16 @@ HttpResponse HttpClient::get(const std::string& url,
   throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body),
                       "set write data");
 
-  throw_on_curl_error(curl_easy_perform(curl), "GET " + url);
+  throw_on_curl_error(curl_easy_perform(curl),
+                      "GET " + redact_url_secrets(url));
 
   long status = 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   char* effective_url = nullptr;
   curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url);
   if (status >= 400) {
-    throw std::runtime_error("HTTP " + std::to_string(status) + " for " + url);
+    throw std::runtime_error("HTTP " + std::to_string(status) + " for " +
+                             redact_url_secrets(url));
   }
   return HttpResponse{
       .status_code = status,
@@ -133,7 +150,11 @@ HttpResponse HttpClient::get(const std::string& url,
 void HttpClient::download_to_file(
     const std::string& url, const std::filesystem::path& output_path,
     bool resume,
-    const std::function<void(const HttpDownloadProgress&)>& progress) const {
+    const std::function<void(const HttpDownloadProgress&)>& progress,
+    const std::function<bool()>& should_cancel) const {
+  if (should_cancel && should_cancel()) {
+    throw HttpRequestCancelled();
+  }
   ensure_directory(output_path.parent_path());
   std::ios::openmode mode = std::ios::binary;
   curl_off_t resume_from = 0;
@@ -169,9 +190,10 @@ void HttpClient::download_to_file(
 
   ProgressContext progress_context{
       .callback = &progress,
+      .should_cancel = &should_cancel,
       .handle = curl,
   };
-  if (progress) {
+  if (progress || should_cancel) {
     throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L),
                         "enable progress");
     throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION,
@@ -182,11 +204,17 @@ void HttpClient::download_to_file(
                         "set progress data");
   }
 
-  throw_on_curl_error(curl_easy_perform(curl), "download " + url);
+  const auto code = curl_easy_perform(curl);
+  output.flush();
+  if (code == CURLE_ABORTED_BY_CALLBACK && should_cancel && should_cancel()) {
+    throw HttpRequestCancelled();
+  }
+  throw_on_curl_error(code, "download " + redact_url_secrets(url));
   long status = 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   if (status >= 400) {
-    throw std::runtime_error("HTTP " + std::to_string(status) + " for " + url);
+    throw std::runtime_error("HTTP " + std::to_string(status) + " for " +
+                             redact_url_secrets(url));
   }
 }
 

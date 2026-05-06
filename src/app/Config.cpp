@@ -37,7 +37,47 @@ std::string unquote(std::string value) {
 
 bool parse_bool(std::string_view value) {
   const auto token = lower(trim(value));
-  return token == "true" || token == "yes" || token == "1" || token == "on";
+  if (token == "true" || token == "yes" || token == "1" || token == "on") {
+    return true;
+  }
+  if (token == "false" || token == "no" || token == "0" || token == "off") {
+    return false;
+  }
+  throw std::runtime_error("invalid bool value: " + std::string(value));
+}
+
+int parse_positive_int(std::string_view value, std::string_view key) {
+  const auto token = trim(value);
+  std::size_t consumed = 0;
+  int parsed = 0;
+  try {
+    parsed = std::stoi(token, &consumed);
+  } catch (const std::exception&) {
+    throw std::runtime_error("invalid integer for " + std::string(key) +
+                             ": " + std::string(value));
+  }
+  if (consumed != token.size() || parsed <= 0) {
+    throw std::runtime_error("invalid positive integer for " +
+                             std::string(key) + ": " + std::string(value));
+  }
+  return parsed;
+}
+
+Rating parse_rating_config(std::string value) {
+  value = unquote(value);
+  const auto rating = rating_from_string(value);
+  if (rating == Rating::Unknown && lower(trim(value)) != "unknown") {
+    throw std::runtime_error("invalid rating value: " + value);
+  }
+  return rating;
+}
+
+std::string parse_download_quality(std::string value) {
+  value = lower(unquote(value));
+  if (value != "original" && value != "sample" && value != "preview") {
+    throw std::runtime_error("invalid preferred_download_quality: " + value);
+  }
+  return value;
 }
 
 std::string quote(std::string_view value) {
@@ -120,13 +160,14 @@ void set_value(AppConfig& config, const std::string& section,
     } else if (key == "user_agent") {
       config.user_agent = unquote(value);
     } else if (key == "max_concurrent_downloads") {
-      config.max_concurrent_downloads = std::stoi(value);
+      config.max_concurrent_downloads =
+          parse_positive_int(value, "max_concurrent_downloads");
     } else if (key == "per_site_delay_ms") {
-      config.per_site_delay_ms = std::stoi(value);
+      config.per_site_delay_ms = parse_positive_int(value, "per_site_delay_ms");
     } else if (key == "preferred_preview_backend") {
       config.preferred_preview_backend = unquote(value);
     } else if (key == "preferred_download_quality") {
-      config.preferred_download_quality = unquote(value);
+      config.preferred_download_quality = parse_download_quality(value);
     } else if (key == "enable_nsfw") {
       config.enable_nsfw = parse_bool(value);
     }
@@ -135,7 +176,7 @@ void set_value(AppConfig& config, const std::string& section,
 
   if (section == "filters") {
     if (key == "default_rating") {
-      config.default_rating = rating_from_string(unquote(value));
+      config.default_rating = parse_rating_config(value);
     } else if (key == "blacklisted_tags") {
       config.blacklisted_tags = parse_string_array(value);
     }
@@ -232,7 +273,9 @@ AppConfig Config::load(const std::filesystem::path& path) {
 
   std::string section = "app";
   std::string line;
+  int line_number = 0;
   while (std::getline(file, line)) {
+    ++line_number;
     line = strip_comment(line);
     if (line.empty()) {
       continue;
@@ -253,6 +296,7 @@ AppConfig Config::load(const std::filesystem::path& path) {
     if (value == "[") {
       std::string array_body = "[";
       while (std::getline(file, line)) {
+        ++line_number;
         auto body_line = strip_comment(line);
         array_body += body_line;
         if (body_line.find(']') != std::string::npos) {
@@ -262,7 +306,13 @@ AppConfig Config::load(const std::filesystem::path& path) {
       value = array_body;
     }
 
-    set_value(config, section, key, value);
+    try {
+      set_value(config, section, key, value);
+    } catch (const std::exception& error) {
+      throw std::runtime_error(path.string() + ":" +
+                               std::to_string(line_number) + ": " +
+                               error.what());
+    }
   }
   return config;
 }

@@ -30,9 +30,12 @@ bool is_terminal_status(DownloadStatus status) {
 }  // namespace
 
 DownloadManager::DownloadManager(HttpClient& http, ArchiveIndex& index,
-                                 ContentRules rules, DownloadOptions options)
+                                 ContentRules rules,
+                                 std::shared_ptr<std::mutex> index_mutex,
+                                 DownloadOptions options)
     : http_(http),
       index_(index),
+      index_mutex_(std::move(index_mutex)),
       rules_(std::move(rules)),
       options_(std::move(options)) {}
 
@@ -161,9 +164,24 @@ void DownloadManager::process_job(std::size_t job_id) {
     if (job_id >= jobs_.size()) {
       return;
     }
+    if (jobs_[job_id].status == DownloadStatus::Cancelled) {
+      return;
+    }
     if (!is_post_allowed(jobs_[job_id].post, rules_, &reason)) {
       jobs_[job_id].status = DownloadStatus::Skipped;
       jobs_[job_id].error_message = reason;
+      return;
+    }
+    if (has_duplicate_job_locked(job_id)) {
+      jobs_[job_id].status = DownloadStatus::Skipped;
+      jobs_[job_id].error_message = "duplicate queued download";
+      return;
+    }
+  }
+  {
+    std::lock_guard index_lock(*index_mutex_);
+    std::lock_guard lock(mutex_);
+    if (job_id >= jobs_.size() || jobs_[job_id].status == DownloadStatus::Cancelled) {
       return;
     }
     if (index_.contains_duplicate(jobs_[job_id].post.hash, jobs_[job_id].post.provider,
@@ -196,16 +214,36 @@ void DownloadManager::process_job(std::size_t job_id) {
               job.total_bytes = progress.total;
               job.speed_bytes_per_second = progress.speed_bytes_per_second;
             });
-          });
+          },
+          [this, job_id] { return is_cancelled(job_id); });
+
+      if (is_cancelled(job_id)) {
+        std::error_code ignored;
+        std::filesystem::remove(snapshot.temp_path, ignored);
+        return;
+      }
 
       ensure_directory(snapshot.destination_path.parent_path());
-      std::filesystem::rename(snapshot.temp_path, snapshot.destination_path);
-      snapshot.destination_path = std::filesystem::absolute(snapshot.destination_path);
-      snapshot.status = DownloadStatus::Complete;
-      snapshot.error_message.clear();
-
-      LocalArchiveItem item = archive_item_from_job(snapshot);
-      index_.upsert(item);
+      {
+        std::lock_guard index_lock(*index_mutex_);
+        if (index_.contains_duplicate(snapshot.post.hash, snapshot.post.provider,
+                                      snapshot.post.id, snapshot.post.file_url)) {
+          std::error_code ignored;
+          std::filesystem::remove(snapshot.temp_path, ignored);
+          update_job(job_id, [](DownloadJob& job) {
+            job.status = DownloadStatus::Skipped;
+            job.error_message = "duplicate archive item";
+          });
+          return;
+        }
+        std::filesystem::rename(snapshot.temp_path, snapshot.destination_path);
+        snapshot.destination_path =
+            std::filesystem::absolute(snapshot.destination_path);
+        snapshot.status = DownloadStatus::Complete;
+        snapshot.error_message.clear();
+        LocalArchiveItem item = archive_item_from_job(snapshot);
+        index_.upsert(item);
+      }
 
       update_job(job_id, [&](DownloadJob& job) {
         job.status = DownloadStatus::Complete;
@@ -217,7 +255,31 @@ void DownloadManager::process_job(std::size_t job_id) {
         }
       });
       return;
+    } catch (const HttpRequestCancelled&) {
+      update_job(job_id, [](DownloadJob& job) {
+        job.status = DownloadStatus::Cancelled;
+        job.error_message.clear();
+      });
+      std::error_code ignored;
+      DownloadJob snapshot;
+      {
+        std::lock_guard lock(mutex_);
+        if (job_id < jobs_.size()) {
+          snapshot = jobs_[job_id];
+        }
+      }
+      if (!snapshot.temp_path.empty()) {
+        std::filesystem::remove(snapshot.temp_path, ignored);
+      }
+      return;
     } catch (const std::exception& error) {
+      if (is_cancelled(job_id)) {
+        update_job(job_id, [](DownloadJob& job) {
+          job.status = DownloadStatus::Cancelled;
+          job.error_message.clear();
+        });
+        return;
+      }
       update_job(job_id, [&](DownloadJob& job) {
         job.retry_count = attempt;
         job.error_message = error.what();
@@ -248,6 +310,43 @@ std::string DownloadManager::selected_url(const Post& post) const {
       return post.sample_url.empty() ? post.file_url : post.sample_url;
   }
   return post.file_url;
+}
+
+bool DownloadManager::is_cancelled(std::size_t job_id) const {
+  std::lock_guard lock(mutex_);
+  return job_id < jobs_.size() &&
+         jobs_[job_id].status == DownloadStatus::Cancelled;
+}
+
+bool DownloadManager::has_duplicate_job_locked(std::size_t job_id) const {
+  if (job_id >= jobs_.size()) {
+    return false;
+  }
+  const auto& current = jobs_[job_id].post;
+  for (std::size_t i = 0; i < jobs_.size(); ++i) {
+    if (i == job_id || hidden_jobs_[i]) {
+      continue;
+    }
+    const auto status = jobs_[i].status;
+    if (status == DownloadStatus::Failed || status == DownloadStatus::Cancelled) {
+      continue;
+    }
+    if (i > job_id && status == DownloadStatus::Queued) {
+      continue;
+    }
+    const auto& other = jobs_[i].post;
+    const bool same_hash =
+        !current.hash.empty() && !other.hash.empty() && current.hash == other.hash;
+    const bool same_provider_post =
+        !current.provider.empty() && !current.id.empty() &&
+        current.provider == other.provider && current.id == other.id;
+    const bool same_file_url = !current.file_url.empty() && !other.file_url.empty() &&
+                               current.file_url == other.file_url;
+    if (same_hash || same_provider_post || same_file_url) {
+      return true;
+    }
+  }
+  return false;
 }
 
 LocalArchiveItem DownloadManager::archive_item_from_job(

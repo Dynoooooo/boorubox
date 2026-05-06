@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.28)
 project(BooruBox VERSION 0.1.0 LANGUAGES CXX)
 
 option(BOORUBOX_BUILD_TESTS "Build BooruBox tests" ON)
+set(BOORUBOX_SANITIZERS "" CACHE STRING
+    "Comma-separated sanitizer list, for example address,undefined or thread")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,6 +68,20 @@ else()
   target_compile_options(boorubox_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+function(boorubox_apply_sanitizers target)
+  if(BOORUBOX_SANITIZERS AND NOT MSVC)
+    target_compile_options(${target} PRIVATE
+      -fsanitize=${BOORUBOX_SANITIZERS}
+      -fno-omit-frame-pointer
+    )
+    target_link_options(${target} PRIVATE
+      -fsanitize=${BOORUBOX_SANITIZERS}
+    )
+  endif()
+endfunction()
+
+boorubox_apply_sanitizers(boorubox_core)
+
 add_executable(boorubox
   src/main.cpp
   src/gui/GalleryPage.cpp
@@ -93,6 +109,7 @@ if(MSVC)
 else()
   target_compile_options(boorubox PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+boorubox_apply_sanitizers(boorubox)
 
 if(BOORUBOX_BUILD_TESTS)
   include(CTest)
@@ -109,6 +126,7 @@ if(BOORUBOX_BUILD_TESTS)
     tests/test_json_parsing.cpp
     tests/test_filename_sanitize.cpp
     tests/test_blacklist.cpp
+    tests/test_config_validation.cpp
     tests/test_archive_index.cpp
   )
   if(SQLite3_FOUND)
@@ -121,6 +139,7 @@ if(BOORUBOX_BUILD_TESTS)
       boorubox_core
       Catch2::Catch2WithMain
   )
+  boorubox_apply_sanitizers(boorubox_tests)
   include(Catch)
   catch_discover_tests(boorubox_tests)
 endif()

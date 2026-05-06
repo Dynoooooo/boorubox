@@ -33,3 +33,15 @@ TEST_CASE("SFW mode blocks questionable and explicit ratings") {
   safe.rating = Rating::Safe;
   REQUIRE(is_post_allowed(safe, rules));
 }
+
+TEST_CASE("SFW mode fails closed for unknown ratings") {
+  ContentRules rules;
+  rules.enable_nsfw = false;
+
+  Post unknown;
+  unknown.rating = Rating::Unknown;
+
+  std::string reason;
+  REQUIRE_FALSE(is_post_allowed(unknown, rules, &reason));
+  REQUIRE(reason == "blocked by SFW rating policy");
+}
