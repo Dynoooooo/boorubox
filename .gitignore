@@ -1,0 +1,30 @@
+# Build output
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+boorubox
+boorubox_tests
+
+# Local runtime data
+*.part
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store

@@ -1,0 +1,53 @@
+[app]
+download_dir = "~/Pictures/BooruBox"
+cache_dir = "~/.cache/boorubox"
+index_path = "~/.local/share/boorubox/index.sqlite"
+user_agent = "BooruBox/0.1 (+https://example.invalid/boorubox; contact@example.invalid)"
+max_concurrent_downloads = 3
+per_site_delay_ms = 1000
+preferred_preview_backend = "kitty"
+preferred_download_quality = "original"
+enable_nsfw = false
+
+[filters]
+default_rating = "safe"
+blacklisted_tags = [
+  "gore",
+  "loli",
+  "shota",
+  "young-looking",
+  "minors"
+]
+
+[filenames]
+template = "{provider}/{artist}/{id}_{md5}.{ext}"
+
+[providers.danbooru]
+enabled = true
+base_url = "https://danbooru.donmai.us"
+nsfw_provider = false
+
+[providers.safebooru]
+enabled = true
+base_url = "https://safebooru.org"
+nsfw_provider = false
+
+[providers.gelbooru]
+enabled = true
+base_url = "https://gelbooru.com"
+nsfw_provider = false
+
+[providers.e926]
+enabled = true
+base_url = "https://e926.net"
+nsfw_provider = false
+
+[providers.e621]
+enabled = false
+base_url = "https://e621.net"
+nsfw_provider = true
+
+[providers.rule34]
+enabled = false
+base_url = "https://rule34.xxx"
+nsfw_provider = true
