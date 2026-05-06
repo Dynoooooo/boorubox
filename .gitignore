@@ -1,5 +1,7 @@
 # Build output
 build/
+build-*/
+dist/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake

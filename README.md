@@ -53,6 +53,29 @@ CMake fetches nlohmann/json and Catch2 at configure time. JSONL indexing works
 without SQLite if `index_path` is changed to a `.jsonl` file and the SQLite index
 class is not used.
 
+## Prebuilt Linux Release
+
+GitHub releases include a Linux x86_64 tarball with the `boorubox` executable,
+`LICENSE`, `README.md`, and `config.example.toml`.
+
+The current tarball is dynamically linked. On Ubuntu/Debian, install the runtime
+libraries first:
+
+```bash
+sudo apt install libqt6widgets6 qt6-qpa-plugins libcurl4 libsqlite3-0
+```
+
+Then unpack and run:
+
+```bash
+tar -xzf boorubox-v0.1.0-linux-x86_64.tar.gz
+cd boorubox-v0.1.0-linux-x86_64
+./boorubox
+```
+
+Because BooruBox is AGPLv3, each release is tied to a source tag in this GitHub
+repository.
+
 ## Build
 
 ```bash
