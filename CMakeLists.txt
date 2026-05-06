@@ -34,10 +34,7 @@ add_library(boorubox_core
   src/index/JsonlArchiveIndex.cpp
   src/index/SqliteArchiveIndex.cpp
   src/model/DownloadJob.cpp
-  src/preview/BlockPreview.cpp
-  src/preview/KittyPreview.cpp
   src/preview/PreviewCache.cpp
-  src/preview/SixelPreview.cpp
   src/providers/DanbooruProvider.cpp
   src/providers/E621Provider.cpp
   src/providers/GelbooruProvider.cpp

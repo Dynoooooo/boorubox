@@ -164,8 +164,6 @@ void set_value(AppConfig& config, const std::string& section,
           parse_positive_int(value, "max_concurrent_downloads");
     } else if (key == "per_site_delay_ms") {
       config.per_site_delay_ms = parse_positive_int(value, "per_site_delay_ms");
-    } else if (key == "preferred_preview_backend") {
-      config.preferred_preview_backend = unquote(value);
     } else if (key == "preferred_download_quality") {
       config.preferred_download_quality = parse_download_quality(value);
     } else if (key == "enable_nsfw") {
@@ -206,7 +204,6 @@ AppConfig Config::defaults() {
       "BooruBox/0.1 (+https://example.invalid/boorubox; contact@example.invalid)";
   config.max_concurrent_downloads = 3;
   config.per_site_delay_ms = 1000;
-  config.preferred_preview_backend = "kitty";
   config.preferred_download_quality = "original";
   config.enable_nsfw = false;
   config.default_rating = Rating::Safe;
@@ -332,8 +329,6 @@ void Config::save(const AppConfig& config, const std::filesystem::path& path) {
   out << "user_agent = " << quote(config.user_agent) << "\n";
   out << "max_concurrent_downloads = " << config.max_concurrent_downloads << "\n";
   out << "per_site_delay_ms = " << config.per_site_delay_ms << "\n";
-  out << "preferred_preview_backend = "
-      << quote(config.preferred_preview_backend) << "\n";
   out << "preferred_download_quality = "
       << quote(config.preferred_download_quality) << "\n";
   out << "enable_nsfw = " << (config.enable_nsfw ? "true" : "false") << "\n\n";

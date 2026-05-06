@@ -224,7 +224,7 @@ Implemented modules:
 - `download`: queued download manager, `.part` files, retries, resume, filename
   templates
 - `index`: archive interface, JSONL implementation, optional SQLite implementation
-- `preview`: preview cache and preview backend abstractions
+- `preview`: GUI thumbnail/preview cache
 - `gui`: Qt Widgets main window and pages
 - `tests`: URL building, JSON parsing, filename sanitization, blacklist filtering,
   duplicate detection, archive indexing

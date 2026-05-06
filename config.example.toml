@@ -5,7 +5,6 @@ index_path = "~/.local/share/boorubox/index.sqlite"
 user_agent = "BooruBox/0.1 (+https://example.invalid/boorubox; contact@example.invalid)"
 max_concurrent_downloads = 3
 per_site_delay_ms = 1000
-preferred_preview_backend = "kitty"
 preferred_download_quality = "original"
 enable_nsfw = false
 

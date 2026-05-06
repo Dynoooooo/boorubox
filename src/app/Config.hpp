@@ -24,7 +24,6 @@ struct AppConfig {
   std::string user_agent;
   int max_concurrent_downloads = 3;
   int per_site_delay_ms = 1000;
-  std::string preferred_preview_backend = "kitty";
   std::string preferred_download_quality = "original";
   bool enable_nsfw = false;
 
