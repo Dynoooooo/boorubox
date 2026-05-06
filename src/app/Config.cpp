@@ -201,7 +201,7 @@ AppConfig Config::defaults() {
   config.cache_dir = cache_home() / "boorubox";
   config.index_path = data_home() / "boorubox/index.sqlite";
   config.user_agent =
-      "BooruBox/0.1 (+https://example.invalid/boorubox; contact@example.invalid)";
+      "BooruBox/0.1.1 (+https://example.invalid/boorubox; contact@example.invalid)";
   config.max_concurrent_downloads = 3;
   config.per_site_delay_ms = 1000;
   config.preferred_download_quality = "original";

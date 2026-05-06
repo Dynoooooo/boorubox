@@ -35,7 +35,7 @@ blocks.
 Use a clear User-Agent in your config, for example:
 
 ```toml
-user_agent = "BooruBox/0.1 (+https://your.repo.example/boorubox; you@example.com)"
+user_agent = "BooruBox/0.1.1 (+https://your.repo.example/boorubox; you@example.com)"
 ```
 
 Never put API keys or passwords in source control.
@@ -68,8 +68,8 @@ sudo apt install libqt6widgets6 qt6-qpa-plugins libcurl4 libsqlite3-0
 Then unpack and run:
 
 ```bash
-tar -xzf boorubox-v0.1.0-linux-x86_64.tar.gz
-cd boorubox-v0.1.0-linux-x86_64
+tar -xzf boorubox-v0.1.1-linux-x86_64.tar.gz
+cd boorubox-v0.1.1-linux-x86_64
 ./boorubox
 ```
 
