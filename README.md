@@ -35,7 +35,7 @@ blocks.
 Use a clear User-Agent in your config, for example:
 
 ```toml
-user_agent = "BooruBox/0.1.1 (+https://your.repo.example/boorubox; you@example.com)"
+user_agent = "BooruBox/0.1.2 (+https://your.repo.example/boorubox; you@example.com)"
 ```
 
 Never put API keys or passwords in source control.
@@ -68,8 +68,8 @@ sudo apt install libqt6widgets6 qt6-qpa-plugins libcurl4 libsqlite3-0
 Then unpack and run:
 
 ```bash
-tar -xzf boorubox-v0.1.1-linux-x86_64.tar.gz
-cd boorubox-v0.1.1-linux-x86_64
+tar -xzf boorubox-v0.1.2-linux-x86_64.tar.gz
+cd boorubox-v0.1.2-linux-x86_64
 ./boorubox
 ```
 
@@ -125,12 +125,14 @@ Implemented:
   panel, download selected/all visible, open post URL, and Use as Reference.
 - Preview loading through the existing preview cache. Preview/sample URLs are
   preferred; full originals are not downloaded just to preview.
-- Queue page with status, progress bars, speed, error messages, retry failed, and
-  cancel selected.
+- Queue page with status, progress bars, speed, error messages, retry failed,
+  and cancel selected. Refresh is incremental, preserving selection and
+  reusing cell widgets between ticks.
 - Queue cleanup can clear failed and skipped jobs, including skipped duplicate
   downloads, without touching active downloads.
-- Gallery page with local thumbnails, provider/rating/favorite filters, tag
-  search, sorting, image preview, open file, Use as Reference, and rebuild index.
+- Gallery page with local thumbnails (loaded off the UI thread), provider/
+  rating/favorite filters, tag search, sorting, image preview, open file,
+  Use as Reference, and rebuild index.
 - Reference images from Results or Gallery are shown on the Search page. Their
   metadata tags are displayed but are only copied into the Tags field when the
   user clicks Use Reference Tags.
@@ -141,6 +143,54 @@ Implemented:
 - Rating controls hide sensitive/questionable/explicit choices while SFW mode is
   active.
 - Logs page that polls the existing in-memory logger and supports Copy All.
+  Unknown keys in the config file surface as warnings here.
+- Providers: Danbooru, Safebooru, Gelbooru, rule34 (Gelbooru DAPI), e926, and
+  e621. NSFW-only providers are hidden when SFW mode is on.
+
+## What Changed in v0.1.2
+
+Safety and correctness:
+
+- Danbooru's 2-tag public budget now prioritizes the rating filter over
+  user-supplied tags so SFW mode cannot be silently weakened by tag pressure.
+  Client-side rating and blacklist enforcement remains in place as a second
+  line of defense.
+- `rule34` is now wired up through the Gelbooru-compatible DAPI. Previously
+  enabling it in the config did nothing.
+- HTTP resume validates the response. If a server returns `200 OK` instead of
+  `206 Partial Content`, BooruBox truncates any stale partial bytes before
+  writing the fresh body, eliminating a concatenation-corruption class of bug.
+- Large-file downloads use a low-speed watchdog instead of a hard total-
+  transfer timeout; short API requests keep their 120s cap.
+
+Responsiveness:
+
+- `App::search` snapshots its state under the mutex and releases it before any
+  HTTP traffic. The GUI is no longer serialized against multi-second network
+  calls.
+- GalleryPage thumbnails load on worker threads and convert to `QPixmap` on
+  the GUI thread.
+- QueuePage refresh is incremental and preserves selection.
+
+Config and tooling:
+
+- Unknown keys or sections in the config file produce warnings in the Logs
+  page, catching typos early.
+- Multi-line TOML arrays accept trailing whitespace and comments after the
+  opening `[`.
+- A single source of truth for the version string is generated into
+  `app/Version.hpp` via CMake's `configure_file`.
+
+Tests:
+
+- 28 test cases (up from 18), including a new `DownloadManager` suite and
+  `HttpClient` tests exercising resume, cancellation, and body handling via
+  curl's `file://` protocol.
+
+CI:
+
+- `actions/cache` keeps the FetchContent artifacts across runs, saving about a
+  minute per job.
 
 ## Roadmap
 
@@ -202,6 +252,17 @@ MVP.
 - Response: Gelbooru-style DAPI JSON
 - Limit note: Safebooru documents a hard post-list limit of 1000
 - Docs: <https://safebooru.org/index.php?page=help&topic=dapi>
+
+### Rule34
+
+- Base URL: `https://rule34.xxx`
+- NSFW-only. Disabled by default; hidden in SFW mode.
+- Uses the same Gelbooru-compatible DAPI shape as Gelbooru/Safebooru, so
+  BooruBox reuses `GelbooruProvider` to talk to it.
+- Response: Gelbooru-style DAPI JSON
+- Limit note: wired with a 1000-post hard cap, matching the Gelbooru-family
+  documented ceiling.
+- Docs: <https://rule34.xxx/index.php?page=help&topic=dapi>
 
 ### e926/e621
 

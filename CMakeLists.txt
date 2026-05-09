@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(BooruBox VERSION 0.1.1 LANGUAGES CXX)
+project(BooruBox VERSION 0.1.2 LANGUAGES CXX)
 
 option(BOORUBOX_BUILD_TESTS "Build BooruBox tests" ON)
 set(BOORUBOX_SANITIZERS "" CACHE STRING
