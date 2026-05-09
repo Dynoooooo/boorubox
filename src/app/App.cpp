@@ -140,32 +140,43 @@ std::vector<std::string> App::provider_names() const {
 }
 
 std::vector<Post> App::search(const SearchQuery& query) {
-  std::lock_guard lock(state_mutex_);
-  auto* provider = provider_by_name(query.provider_name);
-  if (provider == nullptr) {
-    throw std::runtime_error("unknown provider: " + query.provider_name);
-  }
-  if (!config_.enable_nsfw && provider->is_nsfw_provider()) {
-    throw std::runtime_error("provider is hidden while enable_nsfw=false: " +
-                             query.provider_name);
+  // Snapshot all state needed to run the search, then drop state_mutex_ before
+  // issuing any HTTP traffic. Holding the mutex across HTTP would serialize
+  // GUI reads of config/provider names against a potentially multi-second
+  // network call.
+  std::shared_ptr<SiteProvider> provider;
+  std::shared_ptr<RateLimiter> rate_limiter;
+  SearchSafety safety;
+  ContentRules rules;
+  bool nsfw_enabled = false;
+  {
+    std::lock_guard lock(state_mutex_);
+    provider = provider_by_name_locked(query.provider_name);
+    if (provider == nullptr) {
+      throw std::runtime_error("unknown provider: " + query.provider_name);
+    }
+    if (!config_.enable_nsfw && provider->is_nsfw_provider()) {
+      throw std::runtime_error("provider is hidden while enable_nsfw=false: " +
+                               query.provider_name);
+    }
+    rate_limiter = rate_limiter_for_locked(provider.get());
+    safety = search_safety_unlocked();
+    rules = content_rules_unlocked();
+    nsfw_enabled = config_.enable_nsfw;
   }
 
   const auto run_query = [&](const SearchQuery& current_query,
                              bool retry) -> std::pair<std::vector<Post>, std::size_t> {
-    const auto request =
-        provider->build_search_request(current_query, search_safety_unlocked());
+    const auto request = provider->build_search_request(current_query, safety);
     logger_.info(std::string(retry ? "Search retry on " : "Search started on ") +
                  current_query.provider_name + ": tags=\"" +
                  join(current_query.tags, " ") + "\" excluded=\"" +
                  join(current_query.excluded_tags, " ") + "\" rating=" +
                  to_string(current_query.rating_filter) +
-                 (config_.enable_nsfw ? " nsfw=on" : " sfw=on"));
+                 (nsfw_enabled ? " nsfw=on" : " sfw=on"));
     logger_.info("GET " + redact_url_secrets(request.url));
-    for (std::size_t i = 0; i < providers_.size(); ++i) {
-      if (providers_[i].get() == provider) {
-        rate_limiters_[i]->wait();
-        break;
-      }
+    if (rate_limiter != nullptr) {
+      rate_limiter->wait();
     }
 
     const auto response = http_.get(request.url, request.headers);
@@ -180,7 +191,7 @@ std::vector<Post> App::search(const SearchQuery& query) {
                    " result(s) by requested rating");
     }
     const auto before_safety = posts.size();
-    posts = filter_posts(std::move(posts), content_rules_unlocked());
+    posts = filter_posts(std::move(posts), rules);
     if (posts.size() != before_safety) {
       logger_.warn("filtered " + std::to_string(before_safety - posts.size()) +
                    " result(s) by safety rules");
@@ -292,6 +303,26 @@ SiteProvider* App::provider_by_name(const std::string& name) const {
   return nullptr;
 }
 
+std::shared_ptr<SiteProvider> App::provider_by_name_locked(
+    const std::string& name) const {
+  for (const auto& provider : providers_) {
+    if (provider->name() == name) {
+      return provider;
+    }
+  }
+  return nullptr;
+}
+
+std::shared_ptr<RateLimiter> App::rate_limiter_for_locked(
+    const SiteProvider* provider) const {
+  for (std::size_t i = 0; i < providers_.size(); ++i) {
+    if (providers_[i].get() == provider && i < rate_limiters_.size()) {
+      return rate_limiters_[i];
+    }
+  }
+  return nullptr;
+}
+
 SearchSafety App::search_safety_unlocked() const {
   return SearchSafety{
       .enable_nsfw = config_.enable_nsfw,
@@ -310,36 +341,45 @@ ContentRules App::content_rules_unlocked() const {
 void App::register_providers() {
   const auto add_rate_limiter = [&](const SiteProvider& provider) {
     const auto policy = provider.rate_limit_policy();
-    rate_limiters_.push_back(std::make_unique<RateLimiter>(policy.delay));
+    rate_limiters_.push_back(std::make_shared<RateLimiter>(policy.delay));
   };
 
-  const auto add_provider = [&](std::unique_ptr<SiteProvider> provider) {
+  const auto add_provider = [&](std::shared_ptr<SiteProvider> provider) {
     add_rate_limiter(*provider);
     providers_.push_back(std::move(provider));
   };
 
   if (const auto it = config_.providers.find("danbooru");
       it != config_.providers.end() && it->second.enabled) {
-    add_provider(std::make_unique<DanbooruProvider>(it->second.base_url));
+    add_provider(std::make_shared<DanbooruProvider>(it->second.base_url));
   }
   if (const auto it = config_.providers.find("safebooru");
       it != config_.providers.end() && it->second.enabled) {
-    add_provider(std::make_unique<SafebooruProvider>(it->second.base_url));
+    add_provider(std::make_shared<SafebooruProvider>(it->second.base_url));
   }
   if (const auto it = config_.providers.find("gelbooru");
       it != config_.providers.end() && it->second.enabled) {
-    add_provider(std::make_unique<GelbooruProvider>(
+    add_provider(std::make_shared<GelbooruProvider>(
         "gelbooru", it->second.base_url, it->second.nsfw_provider, 100,
+        it->second.login, it->second.api_key));
+  }
+  if (const auto it = config_.providers.find("rule34");
+      it != config_.providers.end() && it->second.enabled) {
+    // rule34 uses the Gelbooru-compatible DAPI but exposes NSFW content, so
+    // it is wired through GelbooruProvider with its own name and capped at
+    // the documented hard limit of 1000 posts per request.
+    add_provider(std::make_shared<GelbooruProvider>(
+        "rule34", it->second.base_url, it->second.nsfw_provider, 1000,
         it->second.login, it->second.api_key));
   }
   if (const auto it = config_.providers.find("e926");
       it != config_.providers.end() && it->second.enabled) {
     add_provider(
-        std::make_unique<E621Provider>("e926", it->second.base_url, false));
+        std::make_shared<E621Provider>("e926", it->second.base_url, false));
   }
   if (const auto it = config_.providers.find("e621");
       it != config_.providers.end() && it->second.enabled) {
-    add_provider(std::make_unique<E621Provider>(
+    add_provider(std::make_shared<E621Provider>(
         "e621", it->second.base_url, it->second.nsfw_provider));
   }
 }

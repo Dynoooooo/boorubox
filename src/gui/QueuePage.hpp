@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 
 #include <QWidget>
 
@@ -20,7 +21,7 @@ class QueuePage final : public QWidget {
   void setStatusCallback(std::function<void(QString)> callback);
 
  private:
-  std::size_t selectedJobId() const;
+  std::optional<std::size_t> selectedJobId() const;
   void retrySelected();
   void cancelSelected();
   void clearFailedAndSkipped();

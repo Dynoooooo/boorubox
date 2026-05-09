@@ -36,13 +36,20 @@ struct AppConfig {
 
 class Config {
  public:
+  struct LoadResult {
+    AppConfig config;
+    std::vector<std::string> warnings;
+  };
+
   static AppConfig defaults();
   static AppConfig load(const std::filesystem::path& path);
+  // Same as `load`, but also reports unknown keys and sections so callers can
+  // surface them to the user (helps catch typos in hand-edited configs).
+  static LoadResult load_with_warnings(const std::filesystem::path& path);
   static void save(const AppConfig& config, const std::filesystem::path& path);
 };
 
 std::filesystem::path default_config_path();
 std::filesystem::path nsfw_warning_ack_path();
-bool acknowledge_nsfw_warning_once(const AppConfig& config);
 
 }  // namespace boorubox

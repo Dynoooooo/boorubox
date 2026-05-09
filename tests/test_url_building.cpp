@@ -24,7 +24,11 @@ TEST_CASE("Danbooru search URL includes safe rating when tag budget allows") {
   REQUIRE(request.url.find("rating%3Ag") != std::string::npos);
 }
 
-TEST_CASE("Danbooru search URL respects public tag budget") {
+TEST_CASE("Danbooru SFW mode never drops the safe rating filter") {
+  // Even when the user supplies as many tags as the public tag budget, the
+  // safe rating filter must remain in the query so the server cannot return
+  // non-safe content. Lower-priority terms (user tags, exclusions) are
+  // truncated instead.
   DanbooruProvider provider("https://danbooru.donmai.us");
   SearchQuery query;
   query.tags = {"landscape", "sky"};
@@ -35,10 +39,25 @@ TEST_CASE("Danbooru search URL respects public tag budget") {
 
   const auto request = provider.build_search_request(query, safety);
 
+  REQUIRE(request.url.find("rating%3Ag") != std::string::npos);
+  // The first user tag still fits under the remaining budget.
+  REQUIRE(request.url.find("landscape") != std::string::npos);
+}
+
+TEST_CASE("Danbooru NSFW mode preserves user-supplied tags in the budget") {
+  // When NSFW mode is on and no explicit rating is requested, the budget is
+  // spent entirely on user tags.
+  DanbooruProvider provider("https://danbooru.donmai.us");
+  SearchQuery query;
+  query.tags = {"landscape", "sky"};
+  query.rating_filter = Rating::Unknown;
+  SearchSafety safety;
+  safety.enable_nsfw = true;
+
+  const auto request = provider.build_search_request(query, safety);
+
   REQUIRE(request.url.find("landscape%20sky") != std::string::npos);
   REQUIRE(request.url.find("rating%3Ag") == std::string::npos);
-  REQUIRE(request.url.find("-watermark") == std::string::npos);
-  REQUIRE(request.url.find("-gore") == std::string::npos);
 }
 
 TEST_CASE("Gelbooru DAPI URL uses JSON endpoint and safe rating") {

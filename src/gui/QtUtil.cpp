@@ -3,6 +3,7 @@
 #include <array>
 
 #include <QColor>
+#include <QComboBox>
 #include <QPalette>
 
 namespace boorubox::gui {
@@ -87,6 +88,21 @@ QString preview_panel_style(const QPalette& palette, bool prominent) {
       .arg(css_color(background))
       .arg(border_width)
       .arg(css_color(border, border_alpha));
+}
+
+void populate_rating_choices(QComboBox& combo, bool sfw_mode,
+                             bool include_unknown) {
+  combo.clear();
+  combo.addItem("safe");
+  combo.addItem("general");
+  if (!sfw_mode) {
+    combo.addItem("sensitive");
+    combo.addItem("questionable");
+    combo.addItem("explicit");
+  }
+  if (include_unknown) {
+    combo.addItem("unknown");
+  }
 }
 
 }  // namespace boorubox::gui

@@ -20,4 +20,10 @@ std::string replace_all(std::string value, std::string_view needle,
 bool starts_with(std::string_view value, std::string_view prefix);
 std::string redact_url_secrets(std::string_view value);
 
+// True when `needle` is empty OR any element of `values` contains `needle` as
+// a case-insensitive substring. Useful for tag/artist filters that should not
+// care about provider-specific casing.
+bool contains_substring_ci(const std::vector<std::string>& values,
+                           std::string_view needle);
+
 }  // namespace boorubox

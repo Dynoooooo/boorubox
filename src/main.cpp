@@ -51,12 +51,15 @@ int main(int argc, char** argv) {
   try {
     const auto config_path = argc > 1 ? std::filesystem::path(argv[1])
                                       : boorubox::default_config_path();
-    auto config = boorubox::Config::load(config_path);
-    if (!acknowledge_nsfw_warning_gui(config)) {
+    auto load_result = boorubox::Config::load_with_warnings(config_path);
+    if (!acknowledge_nsfw_warning_gui(load_result.config)) {
       return 1;
     }
 
-    boorubox::App app(std::move(config));
+    boorubox::App app(std::move(load_result.config));
+    for (const auto& warning : load_result.warnings) {
+      app.log_warn(warning);
+    }
     boorubox::gui::MainWindow window(app, config_path);
     window.show();
     return QApplication::exec();

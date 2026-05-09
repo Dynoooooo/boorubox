@@ -41,6 +41,10 @@ class App {
 
  private:
   SiteProvider* provider_by_name(const std::string& name) const;
+  std::shared_ptr<SiteProvider> provider_by_name_locked(
+      const std::string& name) const;
+  std::shared_ptr<RateLimiter> rate_limiter_for_locked(
+      const SiteProvider* provider) const;
   SearchSafety search_safety_unlocked() const;
   ContentRules content_rules_unlocked() const;
   void register_providers();
@@ -54,8 +58,8 @@ class App {
   PreviewCache preview_cache_;
   DownloadManager download_manager_;
   Logger logger_;
-  std::vector<std::unique_ptr<SiteProvider>> providers_;
-  std::vector<std::unique_ptr<RateLimiter>> rate_limiters_;
+  std::vector<std::shared_ptr<SiteProvider>> providers_;
+  std::vector<std::shared_ptr<RateLimiter>> rate_limiters_;
 };
 
 }  // namespace boorubox

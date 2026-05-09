@@ -22,22 +22,6 @@
 
 namespace boorubox::gui {
 
-namespace {
-
-void add_rating_items(QComboBox& combo, bool sfw_mode) {
-  combo.clear();
-  combo.addItem("safe");
-  combo.addItem("general");
-  if (!sfw_mode) {
-    combo.addItem("sensitive");
-    combo.addItem("questionable");
-    combo.addItem("explicit");
-  }
-  combo.addItem("unknown");
-}
-
-}  // namespace
-
 SettingsPage::SettingsPage(App& app, std::filesystem::path config_path,
                            QWidget* parent)
     : QWidget(parent),
@@ -224,7 +208,7 @@ void SettingsPage::refreshRatingChoices() {
   const bool sfw_mode = !nsfw_check_->isChecked();
   const auto current = rating_box_->currentText();
   const QSignalBlocker blocker(rating_box_);
-  add_rating_items(*rating_box_, sfw_mode);
+  populate_rating_choices(*rating_box_, sfw_mode, /*include_unknown=*/true);
   if (!current.isEmpty() && rating_box_->findText(current) >= 0) {
     rating_box_->setCurrentText(current);
   } else {

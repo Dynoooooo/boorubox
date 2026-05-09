@@ -1,10 +1,7 @@
 #include "index/JsonlArchiveIndex.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <fstream>
-#include <iomanip>
-#include <sstream>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -62,27 +59,6 @@ LocalArchiveItem from_json_object(const nlohmann::json& json) {
   return item;
 }
 
-std::string now_iso8601() {
-  const auto now = std::chrono::system_clock::now();
-  const auto time = std::chrono::system_clock::to_time_t(now);
-  std::tm tm{};
-  gmtime_r(&time, &tm);
-  std::ostringstream out;
-  out << std::put_time(&tm, "%FT%TZ");
-  return out.str();
-}
-
-bool vector_contains_case_insensitive(const std::vector<std::string>& values,
-                                      const std::string& needle) {
-  if (needle.empty()) {
-    return true;
-  }
-  const auto lowered = lower(needle);
-  return std::ranges::any_of(values, [&](const std::string& value) {
-    return lower(value).find(lowered) != std::string::npos;
-  });
-}
-
 bool matches_query(const LocalArchiveItem& item, const ArchiveQuery& query) {
   if (!query.provider.empty() && item.provider != query.provider) {
     return false;
@@ -93,19 +69,13 @@ bool matches_query(const LocalArchiveItem& item, const ArchiveQuery& query) {
   if (query.favorites_only && !item.favorite) {
     return false;
   }
-  if (!vector_contains_case_insensitive(item.tags, query.tag)) {
+  if (!contains_substring_ci(item.tags, query.tag)) {
     return false;
   }
-  if (!vector_contains_case_insensitive(item.artists, query.artist)) {
+  if (!contains_substring_ci(item.artists, query.artist)) {
     return false;
   }
   return true;
-}
-
-bool is_image_like(const std::filesystem::path& path) {
-  const auto ext = lower(path.extension().string());
-  return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
-         ext == ".webp" || ext == ".bmp";
 }
 
 }  // namespace
@@ -198,7 +168,7 @@ void JsonlArchiveIndex::rebuild_from_directory(const std::filesystem::path& root
   }
   for (const auto& entry :
        std::filesystem::recursive_directory_iterator(root)) {
-    if (!entry.is_regular_file() || !is_image_like(entry.path())) {
+    if (!entry.is_regular_file() || !is_image_file(entry.path())) {
       continue;
     }
     LocalArchiveItem item;
@@ -210,7 +180,7 @@ void JsonlArchiveIndex::rebuild_from_directory(const std::filesystem::path& root
       item.file_ext.erase(item.file_ext.begin());
     }
     item.file_size = static_cast<std::int64_t>(entry.file_size());
-    item.downloaded_at = now_iso8601();
+    item.downloaded_at = now_iso8601_utc();
     upsert(item);
   }
 }

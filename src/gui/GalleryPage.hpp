@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <QFutureWatcher>
+#include <QImage>
 #include <QWidget>
 
 #include "app/App.hpp"
@@ -24,6 +25,12 @@ struct GalleryWorkerResult {
   std::string error;
 };
 
+struct GalleryThumbnailResult {
+  int row = -1;
+  int generation = -1;
+  QImage image;
+};
+
 class GalleryPage final : public QWidget {
  public:
   explicit GalleryPage(App& app, QWidget* parent = nullptr);
@@ -38,6 +45,7 @@ class GalleryPage final : public QWidget {
   void showSelectedItem();
   void openSelectedFile();
   void useSelectedAsReference();
+  void loadThumbnails();
   QString metadataText(const LocalArchiveItem& item) const;
 
   App& app_;
@@ -57,6 +65,7 @@ class GalleryPage final : public QWidget {
   QFutureWatcher<GalleryWorkerResult>* refresh_watcher_ = nullptr;
   std::vector<LocalArchiveItem> all_items_;
   std::vector<LocalArchiveItem> visible_items_;
+  int thumbnail_generation_ = 0;
   std::function<void(QString)> status_callback_;
   std::function<void(LocalArchiveItem)> reference_callback_;
 };

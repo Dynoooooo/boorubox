@@ -1,9 +1,9 @@
 #include "app/Config.hpp"
 
 #include <fstream>
-#include <iostream>
 #include <stdexcept>
 
+#include "app/Version.hpp"
 #include "util/PathUtil.hpp"
 #include "util/StringUtil.hpp"
 
@@ -133,7 +133,7 @@ std::vector<std::string> parse_string_array(std::string value) {
   return out;
 }
 
-void set_provider_value(ProviderConfig& provider, std::string_view key,
+bool set_provider_value(ProviderConfig& provider, std::string_view key,
                         const std::string& value) {
   if (key == "enabled") {
     provider.enabled = parse_bool(value);
@@ -145,10 +145,15 @@ void set_provider_value(ProviderConfig& provider, std::string_view key,
     provider.login = unquote(value);
   } else if (key == "api_key") {
     provider.api_key = unquote(value);
+  } else {
+    return false;
   }
+  return true;
 }
 
-void set_value(AppConfig& config, const std::string& section,
+// Returns true when the key was consumed; false if the section/key pair is
+// unknown (callers can convert that into a user-visible warning).
+bool set_value(AppConfig& config, const std::string& section,
                const std::string& key, const std::string& value) {
   if (section == "app") {
     if (key == "download_dir") {
@@ -168,8 +173,10 @@ void set_value(AppConfig& config, const std::string& section,
       config.preferred_download_quality = parse_download_quality(value);
     } else if (key == "enable_nsfw") {
       config.enable_nsfw = parse_bool(value);
+    } else {
+      return false;
     }
-    return;
+    return true;
   }
 
   if (section == "filters") {
@@ -177,20 +184,28 @@ void set_value(AppConfig& config, const std::string& section,
       config.default_rating = parse_rating_config(value);
     } else if (key == "blacklisted_tags") {
       config.blacklisted_tags = parse_string_array(value);
+    } else {
+      return false;
     }
-    return;
+    return true;
   }
 
-  if (section == "filenames" && key == "template") {
-    config.filename_template = unquote(value);
-    return;
+  if (section == "filenames") {
+    if (key == "template") {
+      config.filename_template = unquote(value);
+      return true;
+    }
+    return false;
   }
 
   constexpr std::string_view providers_prefix = "providers.";
   if (starts_with(section, providers_prefix)) {
     const auto provider_name = section.substr(providers_prefix.size());
-    set_provider_value(config.providers[provider_name], key, value);
+    return set_provider_value(config.providers[provider_name], key, value);
   }
+
+  // Unknown section; not our concern to populate, but report it.
+  return false;
 }
 
 }  // namespace
@@ -201,7 +216,8 @@ AppConfig Config::defaults() {
   config.cache_dir = cache_home() / "boorubox";
   config.index_path = data_home() / "boorubox/index.sqlite";
   config.user_agent =
-      "BooruBox/0.1.1 (+https://example.invalid/boorubox; contact@example.invalid)";
+      "BooruBox/" BOORUBOX_VERSION_STRING
+      " (+https://example.invalid/boorubox; contact@example.invalid)";
   config.max_concurrent_downloads = 3;
   config.per_site_delay_ms = 1000;
   config.preferred_download_quality = "original";
@@ -262,10 +278,14 @@ AppConfig Config::defaults() {
 }
 
 AppConfig Config::load(const std::filesystem::path& path) {
-  AppConfig config = defaults();
+  return load_with_warnings(path).config;
+}
+
+Config::LoadResult Config::load_with_warnings(const std::filesystem::path& path) {
+  LoadResult result{.config = defaults()};
   std::ifstream file(path);
   if (!file) {
-    return config;
+    return result;
   }
 
   std::string section = "app";
@@ -290,8 +310,12 @@ AppConfig Config::load(const std::filesystem::path& path) {
     const auto key = trim(std::string_view(line).substr(0, equals));
     auto value = trim(std::string_view(line).substr(equals + 1));
 
-    if (value == "[") {
-      std::string array_body = "[";
+    // Multi-line inline array: the value begins with '[' but the matching
+    // ']' is on a later line. We tolerate trailing whitespace, comments, and
+    // partial content on the opening line.
+    if (!value.empty() && value.front() == '[' &&
+        value.find(']') == std::string::npos) {
+      std::string array_body = value;
       while (std::getline(file, line)) {
         ++line_number;
         auto body_line = strip_comment(line);
@@ -304,14 +328,21 @@ AppConfig Config::load(const std::filesystem::path& path) {
     }
 
     try {
-      set_value(config, section, key, value);
+      const auto consumed =
+          set_value(result.config, section, key, value);
+      if (!consumed) {
+        result.warnings.push_back(path.string() + ":" +
+                                  std::to_string(line_number) +
+                                  ": unknown key '" + key +
+                                  "' in section [" + section + "]");
+      }
     } catch (const std::exception& error) {
       throw std::runtime_error(path.string() + ":" +
                                std::to_string(line_number) + ": " +
                                error.what());
     }
   }
-  return config;
+  return result;
 }
 
 void Config::save(const AppConfig& config, const std::filesystem::path& path) {
@@ -367,35 +398,6 @@ std::filesystem::path default_config_path() {
 
 std::filesystem::path nsfw_warning_ack_path() {
   return state_home() / "boorubox/nsfw-warning-accepted";
-}
-
-bool acknowledge_nsfw_warning_once(const AppConfig& config) {
-  if (!config.enable_nsfw) {
-    return true;
-  }
-  const auto ack_path = nsfw_warning_ack_path();
-  if (std::filesystem::exists(ack_path)) {
-    return true;
-  }
-
-  std::cerr
-      << "BooruBox NSFW mode is enabled.\n"
-      << "Only use providers and searches that are legal for you to access, "
-         "respect each site's rules, and keep blacklists/rating filters active. "
-         "BooruBox will not assist with illegal sexual content, sexualized "
-         "minors, non-consensual sexual content, or bypassing site controls.\n"
-      << "Type I AGREE to continue: ";
-
-  std::string answer;
-  std::getline(std::cin, answer);
-  if (answer != "I AGREE") {
-    return false;
-  }
-
-  ensure_directory(ack_path.parent_path());
-  std::ofstream ack(ack_path);
-  ack << "accepted\n";
-  return true;
 }
 
 }  // namespace boorubox

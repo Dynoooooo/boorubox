@@ -167,4 +167,18 @@ std::string redact_url_secrets(std::string_view value) {
   return out;
 }
 
+bool contains_substring_ci(const std::vector<std::string>& values,
+                           std::string_view needle) {
+  if (needle.empty()) {
+    return true;
+  }
+  const auto lowered = lower(needle);
+  for (const auto& value : values) {
+    if (lower(value).find(lowered) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace boorubox

@@ -35,13 +35,7 @@ QString dimensions(const LocalArchiveItem& item) {
 }
 
 bool contains_tag(const std::vector<std::string>& values, const QString& needle) {
-  if (needle.trimmed().isEmpty()) {
-    return true;
-  }
-  const auto target = lower(to_std_string(needle.trimmed()));
-  return std::ranges::any_of(values, [&](const std::string& value) {
-    return lower(value).find(target) != std::string::npos;
-  });
+  return contains_substring_ci(values, to_std_string(needle.trimmed()));
 }
 
 }  // namespace
@@ -227,15 +221,14 @@ void GalleryPage::applyFilters() {
     return a.downloaded_at > b.downloaded_at;
   });
 
+  // Bump the generation first so any in-flight thumbnail workers from the
+  // previous filter set discard their results on completion.
+  ++thumbnail_generation_;
+
   list_->clear();
   for (std::size_t i = 0; i < visible_items_.size(); ++i) {
-    const auto& item = visible_items_[i];
-    QIcon icon = placeholder_icon(kGalleryThumbSize);
-    const auto pixmap = load_pixmap(item.local_file_path, kGalleryThumbSize);
-    if (!pixmap.isNull()) {
-      icon = QIcon(pixmap);
-    }
-    auto* row = new QListWidgetItem(icon, archive_title(item));
+    auto* row = new QListWidgetItem(placeholder_icon(kGalleryThumbSize),
+                                    archive_title(visible_items_[i]));
     row->setData(Qt::UserRole, static_cast<int>(i));
     list_->addItem(row);
   }
@@ -243,9 +236,38 @@ void GalleryPage::applyFilters() {
   use_reference_button_->setEnabled(!visible_items_.empty());
   if (!visible_items_.empty()) {
     list_->setCurrentRow(0);
+    loadThumbnails();
   } else {
     preview_->setMessage("No local gallery items match the current filters.");
     metadata_->clear();
+  }
+}
+
+void GalleryPage::loadThumbnails() {
+  const int generation = thumbnail_generation_;
+  for (std::size_t index = 0; index < visible_items_.size(); ++index) {
+    const auto path = visible_items_[index].local_file_path;
+    const int row = static_cast<int>(index);
+    auto* watcher = new QFutureWatcher<GalleryThumbnailResult>(this);
+    connect(watcher, &QFutureWatcher<GalleryThumbnailResult>::finished, this,
+            [this, watcher] {
+              const auto result = watcher->result();
+              watcher->deleteLater();
+              if (result.generation != thumbnail_generation_ ||
+                  result.row < 0 || result.row >= list_->count() ||
+                  result.image.isNull()) {
+                return;
+              }
+              list_->item(result.row)->setIcon(
+                  QIcon(QPixmap::fromImage(result.image)));
+            });
+    watcher->setFuture(QtConcurrent::run([row, generation, path] {
+      GalleryThumbnailResult result;
+      result.row = row;
+      result.generation = generation;
+      result.image = load_scaled_image(path, kGalleryThumbSize);
+      return result;
+    }));
   }
 }
 

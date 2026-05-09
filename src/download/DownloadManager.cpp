@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <iomanip>
-#include <sstream>
 #include <stdexcept>
 
 #include "util/PathUtil.hpp"
@@ -11,16 +9,6 @@
 namespace boorubox {
 
 namespace {
-
-std::string now_iso8601() {
-  const auto now = std::chrono::system_clock::now();
-  const auto time = std::chrono::system_clock::to_time_t(now);
-  std::tm tm{};
-  gmtime_r(&time, &tm);
-  std::ostringstream out;
-  out << std::put_time(&tm, "%FT%TZ");
-  return out.str();
-}
 
 bool is_terminal_status(DownloadStatus status) {
   return status == DownloadStatus::Complete || status == DownloadStatus::Skipped ||
@@ -368,7 +356,7 @@ LocalArchiveItem DownloadManager::archive_item_from_job(
       std::filesystem::exists(job.destination_path)
           ? static_cast<std::int64_t>(std::filesystem::file_size(job.destination_path))
           : job.post.file_size;
-  item.downloaded_at = now_iso8601();
+  item.downloaded_at = now_iso8601_utc();
   return item;
 }
 

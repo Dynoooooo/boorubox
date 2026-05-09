@@ -1,9 +1,6 @@
 #include "index/SqliteArchiveIndex.hpp"
 
 #include <algorithm>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -35,26 +32,6 @@ std::vector<std::string> from_json_array(const unsigned char* text) {
   }
 }
 
-std::string now_iso8601() {
-  const auto now = std::chrono::system_clock::now();
-  const auto time = std::chrono::system_clock::to_time_t(now);
-  std::tm tm{};
-  gmtime_r(&time, &tm);
-  std::ostringstream out;
-  out << std::put_time(&tm, "%FT%TZ");
-  return out.str();
-}
-
-bool contains_ci(const std::vector<std::string>& values, const std::string& needle) {
-  if (needle.empty()) {
-    return true;
-  }
-  const auto lowered = lower(needle);
-  return std::ranges::any_of(values, [&](const std::string& value) {
-    return lower(value).find(lowered) != std::string::npos;
-  });
-}
-
 bool matches_query(const LocalArchiveItem& item, const ArchiveQuery& query) {
   if (!query.provider.empty() && item.provider != query.provider) {
     return false;
@@ -65,14 +42,8 @@ bool matches_query(const LocalArchiveItem& item, const ArchiveQuery& query) {
   if (query.favorites_only && !item.favorite) {
     return false;
   }
-  return contains_ci(item.tags, query.tag) &&
-         contains_ci(item.artists, query.artist);
-}
-
-bool is_image_like(const std::filesystem::path& path) {
-  const auto ext = lower(path.extension().string());
-  return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
-         ext == ".webp" || ext == ".bmp";
+  return contains_substring_ci(item.tags, query.tag) &&
+         contains_substring_ci(item.artists, query.artist);
 }
 
 #ifdef BOORUBOX_WITH_SQLITE
@@ -413,7 +384,7 @@ void SqliteArchiveIndex::rebuild_from_directory(
     return;
   }
   for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
-    if (!entry.is_regular_file() || !is_image_like(entry.path())) {
+    if (!entry.is_regular_file() || !is_image_file(entry.path())) {
       continue;
     }
     LocalArchiveItem item;
@@ -425,7 +396,7 @@ void SqliteArchiveIndex::rebuild_from_directory(
       item.file_ext.erase(item.file_ext.begin());
     }
     item.file_size = static_cast<std::int64_t>(entry.file_size());
-    item.downloaded_at = now_iso8601();
+    item.downloaded_at = now_iso8601_utc();
     upsert(item);
   }
 }

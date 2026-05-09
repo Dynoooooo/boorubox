@@ -229,16 +229,21 @@ MVP.
 
 Implemented modules:
 
-- `app`: config loading, safety acknowledgement, provider/download/index wiring
-- `providers`: `SiteProvider`, Danbooru, Gelbooru-compatible, Safebooru, e926/e621
-- `http`: libcurl RAII client
+- `app`: config loading (with unknown-key warnings), safety acknowledgement, provider/download/index wiring
+- `providers`: `SiteProvider`, Danbooru, Gelbooru-compatible (gelbooru/rule34), Safebooru, e926/e621
+- `http`: libcurl RAII client with resume-safe downloads and cancellation
 - `download`: queued download manager, `.part` files, retries, resume, filename
   templates
 - `index`: archive interface, JSONL implementation, optional SQLite implementation
 - `preview`: GUI thumbnail/preview cache
 - `gui`: Qt Widgets main window and pages
 - `tests`: URL building, JSON parsing, filename sanitization, blacklist filtering,
-  duplicate detection, archive indexing
+  duplicate detection, archive indexing, `DownloadManager` lifecycle, and
+  `HttpClient` resume/cancel semantics
+
+The canonical version string lives in `CMakeLists.txt` and is generated into
+`app/Version.hpp` via `configure_file` so that runtime code and the default
+User-Agent both read it from a single source of truth.
 
 ## Adding A Provider
 

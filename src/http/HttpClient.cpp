@@ -1,9 +1,14 @@
 #include "http/HttpClient.hpp"
 
 #include <curl/curl.h>
+#include <unistd.h>
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <string_view>
 
 #include "http/CurlHandle.hpp"
 #include "util/PathUtil.hpp"
@@ -21,12 +26,76 @@ std::size_t write_string_callback(char* ptr, std::size_t size,
   return bytes;
 }
 
+struct DownloadContext {
+  std::FILE* file = nullptr;
+  bool resume_requested = false;
+  long status_code = 0;
+  bool status_known = false;
+  bool file_reset_done = false;
+  bool write_error = false;
+};
+
+std::size_t header_callback(char* ptr, std::size_t size, std::size_t nmemb,
+                            void* userdata) {
+  auto* context = static_cast<DownloadContext*>(userdata);
+  const auto bytes = size * nmemb;
+  if (context == nullptr) {
+    return bytes;
+  }
+  const std::string_view line(ptr, bytes);
+  // Status lines look like "HTTP/1.1 206 Partial Content\r\n". When the server
+  // follows a redirect, curl will deliver more than one status line; we keep
+  // the last one, matching CURLINFO_RESPONSE_CODE.
+  if (line.size() >= 5 &&
+      (line.starts_with("HTTP/") || line.starts_with("http/"))) {
+    const auto space = line.find(' ');
+    if (space != std::string_view::npos && space + 1 < line.size()) {
+      context->status_code =
+          std::strtol(line.data() + space + 1, nullptr, 10);
+      context->status_known = true;
+      // A follow-up status may flip us back: reset the "already truncated"
+      // flag so a 200 on the final hop is still handled correctly.
+      context->file_reset_done = false;
+    }
+  }
+  return bytes;
+}
+
 std::size_t write_file_callback(char* ptr, std::size_t size, std::size_t nmemb,
                                 void* userdata) {
-  auto* output = static_cast<std::ofstream*>(userdata);
-  const auto bytes = static_cast<std::streamsize>(size * nmemb);
-  output->write(ptr, bytes);
-  return output->good() ? static_cast<std::size_t>(bytes) : 0;
+  auto* context = static_cast<DownloadContext*>(userdata);
+  const auto bytes = size * nmemb;
+  if (context == nullptr || context->file == nullptr) {
+    return 0;
+  }
+
+  // First chunk after a status line: if the server ignored our Range request
+  // and returned a full body (200 OK), truncate any existing bytes so we do
+  // not concatenate stale partial data with the fresh full download.
+  if (context->resume_requested && context->status_known &&
+      !context->file_reset_done) {
+    if (context->status_code != 0 && context->status_code != 206) {
+      if (std::fflush(context->file) != 0) {
+        context->write_error = true;
+        return 0;
+      }
+      if (std::fseek(context->file, 0, SEEK_SET) != 0) {
+        context->write_error = true;
+        return 0;
+      }
+      if (::ftruncate(::fileno(context->file), 0) != 0) {
+        context->write_error = true;
+        return 0;
+      }
+    }
+    context->file_reset_done = true;
+  }
+
+  const auto written = std::fwrite(ptr, 1, bytes, context->file);
+  if (written != bytes) {
+    context->write_error = true;
+  }
+  return written;
 }
 
 struct ProgressContext {
@@ -96,8 +165,6 @@ void configure_common(CURL* curl, const std::string& user_agent,
                       "set fail-on-error");
   throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 20L),
                       "set connect timeout");
-  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L),
-                      "set timeout");
 }
 
 }  // namespace
@@ -123,6 +190,10 @@ HttpResponse HttpClient::get(const std::string& url,
                         "set headers");
   }
   configure_common(curl, user_agent_, url);
+  // Small API responses should never take longer than ~2 minutes; kill them
+  // hard if they do. Large file downloads use a low-speed watchdog instead.
+  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L),
+                      "set timeout");
   throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                                        write_string_callback),
                       "set write callback");
@@ -156,33 +227,62 @@ void HttpClient::download_to_file(
     throw HttpRequestCancelled();
   }
   ensure_directory(output_path.parent_path());
-  std::ios::openmode mode = std::ios::binary;
+
   curl_off_t resume_from = 0;
   if (resume && std::filesystem::exists(output_path)) {
     resume_from = static_cast<curl_off_t>(std::filesystem::file_size(output_path));
-    if (resume_from > 0) {
-      mode |= std::ios::app;
-    } else {
-      mode |= std::ios::trunc;
-    }
-  } else {
-    mode |= std::ios::trunc;
   }
+  const bool resume_requested = resume_from > 0;
 
-  std::ofstream output(output_path, mode);
-  if (!output) {
+  // "r+b" lets us seek to the end and (if the server ignores Range) rewind to
+  // the start and truncate without closing/reopening. When there is no resume
+  // we create a fresh file with "wb".
+  std::FILE* file = std::fopen(output_path.string().c_str(),
+                               resume_requested ? "r+b" : "wb");
+  if (file == nullptr && resume_requested) {
+    // The file disappeared between the existence check and fopen; fall back
+    // to a fresh download.
+    resume_from = 0;
+    file = std::fopen(output_path.string().c_str(), "wb");
+  }
+  if (file == nullptr) {
     throw std::runtime_error("failed to open " + output_path.string());
   }
+  if (resume_requested) {
+    if (std::fseek(file, 0, SEEK_END) != 0) {
+      std::fclose(file);
+      throw std::runtime_error("failed to seek " + output_path.string());
+    }
+  }
+
+  DownloadContext download_context{
+      .file = file,
+      .resume_requested = resume_requested,
+  };
 
   CurlEasy easy;
   auto* curl = easy.get();
   configure_common(curl, user_agent_, url);
+  // Large file downloads should not be killed by a hard total-transfer
+  // timeout. Instead, abort if the connection goes idle for a sustained
+  // period.
+  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L),
+                      "set low-speed limit");
+  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L),
+                      "set low-speed time");
   throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
                                        write_file_callback),
                       "set write callback");
-  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_WRITEDATA, &output),
+  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_WRITEDATA,
+                                       &download_context),
                       "set write data");
-  if (resume_from > 0) {
+  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+                                       header_callback),
+                      "set header callback");
+  throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_HEADERDATA,
+                                       &download_context),
+                      "set header data");
+  if (resume_requested) {
     throw_on_curl_error(curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE,
                                          resume_from),
                         "set resume offset");
@@ -205,9 +305,14 @@ void HttpClient::download_to_file(
   }
 
   const auto code = curl_easy_perform(curl);
-  output.flush();
+  std::fflush(file);
+  std::fclose(file);
+
   if (code == CURLE_ABORTED_BY_CALLBACK && should_cancel && should_cancel()) {
     throw HttpRequestCancelled();
+  }
+  if (download_context.write_error) {
+    throw std::runtime_error("failed to write " + output_path.string());
   }
   throw_on_curl_error(code, "download " + redact_url_secrets(url));
   long status = 0;

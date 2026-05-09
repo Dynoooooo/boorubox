@@ -30,17 +30,6 @@ namespace {
 constexpr const char* kAllProvidersValue = "__all_enabled_providers__";
 constexpr std::size_t kMaxReferenceTags = 16;
 
-void add_rating_items(QComboBox& combo, bool sfw_mode) {
-  combo.clear();
-  combo.addItem("safe");
-  combo.addItem("general");
-  if (!sfw_mode) {
-    combo.addItem("sensitive");
-    combo.addItem("questionable");
-    combo.addItem("explicit");
-  }
-}
-
 bool rating_needs_nsfw_provider(Rating rating) {
   return rating == Rating::Sensitive || rating == Rating::Questionable ||
          rating == Rating::Explicit;
@@ -439,7 +428,7 @@ void SearchPage::updateRatingChoices() {
   const bool sfw_mode = !app_.config().enable_nsfw;
   const auto current = rating_box_->currentText();
   const QSignalBlocker blocker(rating_box_);
-  add_rating_items(*rating_box_, sfw_mode);
+  populate_rating_choices(*rating_box_, sfw_mode, /*include_unknown=*/false);
   if (!current.isEmpty() && rating_box_->findText(current) >= 0) {
     rating_box_->setCurrentText(current);
   } else if (const auto fallback = rating_label(app_.config().default_rating);

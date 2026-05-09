@@ -14,6 +14,14 @@ QPixmap load_pixmap(const std::filesystem::path& path, QSize size) {
   return pixmap.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
+QImage load_scaled_image(const std::filesystem::path& path, QSize size) {
+  QImage image(qs(path));
+  if (image.isNull()) {
+    return {};
+  }
+  return image.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+}
+
 QIcon placeholder_icon(QSize size) {
   QPixmap pixmap(size);
   pixmap.fill(Qt::transparent);

@@ -62,31 +62,42 @@ RateLimitPolicy DanbooruProvider::rate_limit_policy() const {
 
 HttpRequest DanbooruProvider::build_search_request(
     const SearchQuery& query, const SearchSafety& safety) const {
+  // Danbooru's public search endpoint caps unauthenticated callers at 2 tag
+  // terms. We prioritize:
+  //   1. Rating filter  - required so SFW policy cannot be bypassed by user
+  //      tags filling the budget.
+  //   2. User tags      - otherwise the search is effectively broken.
+  //   3. Blacklist/user exclusions - enforced client-side after parsing, so
+  //      it is safe to drop them from the URL when the budget is full.
+  //   4. Order directive.
+  constexpr std::size_t kPublicTagBudget = 2;
+
+  std::string rating_term;
+  if (!safety.enable_nsfw) {
+    rating_term = "rating:g";
+  } else if (const auto rating = danbooru_rating_tag(query.rating_filter);
+             !rating.empty()) {
+    rating_term = rating;
+  }
+
   std::vector<std::string> terms;
+  terms.reserve(kPublicTagBudget);
   const auto add_if_room = [&](const std::string& term) {
-    if (!term.empty() && terms.size() < 2) {
+    if (!term.empty() && terms.size() < kPublicTagBudget) {
       terms.push_back(term);
     }
   };
 
+  add_if_room(rating_term);
   for (const auto& tag : query.tags) {
     add_if_room(tag);
   }
-
-  if (!safety.enable_nsfw) {
-    add_if_room("rating:g");
-  } else if (const auto rating = danbooru_rating_tag(query.rating_filter);
-             !rating.empty()) {
-    add_if_room(rating);
-  }
-
   for (const auto& tag : query.excluded_tags) {
     add_if_room("-" + tag);
   }
   for (const auto& tag : safety.blacklisted_tags) {
     add_if_room("-" + tag);
   }
-
   if (!query.order.empty()) {
     add_if_room("order:" + query.order);
   }

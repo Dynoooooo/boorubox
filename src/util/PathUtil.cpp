@@ -1,6 +1,10 @@
 #include "util/PathUtil.hpp"
 
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -77,6 +81,22 @@ std::string extension_from_url(std::string_view url) {
     return {};
   }
   return lower(text.substr(dot + 1));
+}
+
+bool is_image_file(const std::filesystem::path& path) {
+  const auto ext = lower(path.extension().string());
+  return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
+         ext == ".webp" || ext == ".bmp";
+}
+
+std::string now_iso8601_utc() {
+  const auto now = std::chrono::system_clock::now();
+  const auto time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm{};
+  gmtime_r(&time, &tm);
+  std::ostringstream out;
+  out << std::put_time(&tm, "%FT%TZ");
+  return out.str();
 }
 
 }  // namespace boorubox

@@ -24,6 +24,13 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(nlohmann_json)
 
+# Generate a single-source-of-truth version header for C++ code to read.
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/app/Version.hpp.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/app/Version.hpp
+  @ONLY
+)
+
 add_library(boorubox_core
   src/app/App.cpp
   src/app/Config.cpp
@@ -47,7 +54,11 @@ add_library(boorubox_core
   src/util/StringUtil.cpp
 )
 
-target_include_directories(boorubox_core PUBLIC src)
+target_include_directories(boorubox_core
+  PUBLIC
+    src
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
 target_link_libraries(boorubox_core
   PUBLIC
     CURL::libcurl
@@ -125,6 +136,8 @@ if(BOORUBOX_BUILD_TESTS)
     tests/test_blacklist.cpp
     tests/test_config_validation.cpp
     tests/test_archive_index.cpp
+    tests/test_download_manager.cpp
+    tests/test_http_client.cpp
   )
   if(SQLite3_FOUND)
     list(APPEND BOORUBOX_TEST_SOURCES tests/test_sqlite_archive_index.cpp)
